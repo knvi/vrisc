@@ -24,11 +24,18 @@
 #define SIP 0x144
 #define SATP 0x180
 
+enum Mode {
+    User = 0b00,
+    Supervisor = 0b10,
+    Machine = 0b11
+};
+
 class Cpu {
 public:
     uint64_t pc;
     uint64_t reg[32];
     uint64_t csrs[4096];
+    Mode mode;
     Bus bus;
 
 public:

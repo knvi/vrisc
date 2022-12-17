@@ -42,6 +42,7 @@ Cpu::Cpu(std::vector<uint8_t> binary): bus(binary) {
         reg[i] = 0;
     }
     
+    mode = Mode::Machine;
     reg[2] = MEM_BASE + MEM_SIZE; // Stack pointer
     pc = MEM_BASE; // Instructions start at this address
     return;
@@ -367,6 +368,82 @@ void Cpu::execute(uint32_t inst) {
         case 0x73: {
             uint64_t csr_addr = (inst & 0xfff00000) >> 20;
             switch(funct3) {
+                case 0x0: {
+                    if(rs2 == 0x2 && funct7 == 0x8) {
+                        // sret
+                        // The SRET instruction returns from a supervisor-mode exception
+                        // handler. It does the following operations:
+                        // - Sets the pc to CSRs[sepc].
+                        // - Sets the privilege mode to CSRs[sstatus].SPP.
+                        // - Sets CSRs[sstatus].SIE to CSRs[sstatus].SPIE.
+                        // - Sets CSRs[sstatus].SPIE to 1.
+                        // - Sets CSRs[sstatus].SPP to 0.
+                        pc = load_csr(SEPC);
+                        // When the SRET instruction is executed to return from the trap
+                        // handler, the privilege level is set to user mode if the SPP
+                        // bit is 0, or supervisor mode if the SPP bit is 1. The SPP bit
+                        // is the 8th of the SSTATUS csr.
+                        switch((load_csr(SSTATUS) >> 8) + 1) {
+                            case 1: {
+                                mode = Mode::Supervisor;
+                                break;
+                            }
+                            default: {
+                                mode = Mode::User;
+                            }
+                        }
+                        // The SPIE bit is the 5th and the SIE bit is the 1st of the
+                        // SSTATUS csr.
+                        uint64_t val;
+                        if(((load_csr(SSTATUS) >> 5) & 1) == 1) {
+                            val = load_csr(SSTATUS) | (1 << 1);
+                        } else {
+                            val = load_csr(SSTATUS) & !(1 << 1);
+                        }
+                        store_csr(SSTATUS, val);
+                        store_csr(SSTATUS, load_csr(SSTATUS) | (1 << 5));
+                        store_csr(SSTATUS, load_csr(SSTATUS) & !(1 << 8));
+                        break;
+                    } else if(rs2 == 0x2 && funct7 == 0x18) {
+                        // mret
+                        // The MRET instruction returns from a machine-mode exception
+                        // handler. It does the following operations:
+                        // - Sets the pc to CSRs[mepc].
+                        // - Sets the privilege mode to CSRs[mstatus].MPP.
+                        // - Sets CSRs[mstatus].MIE to CSRs[mstatus].MPIE.
+                        // - Sets CSRs[mstatus].MPIE to 1.
+                        // - Sets CSRs[mstatus].MPP to 0.
+                        pc = load_csr(MEPC);
+                        // MPP is two bits wide at [11..12] of the MSTATUS csr.
+                        switch((load_csr(MSTATUS) >> 11) & 0b11) {
+                            case 2: {
+                                mode = Mode::Machine;
+                            }
+                            case 1: {
+                                mode = Mode::Supervisor;
+                            }
+                            default: {
+                                mode = Mode::User;
+                            }
+                        }
+                        uint64_t val;
+                        if(((load_csr(MSTATUS) >> 7) & 1) == 1) {
+                            val = load_csr(MSTATUS) | (1 << 3);
+                        } else {
+                            val = load_csr(MSTATUS) & !(1 << 3);
+                        }
+                        store_csr(MSTATUS, load_csr(MSTATUS) | (1 << 7));
+                        store_csr(MSTATUS, load_csr(MSTATUS) & !(0b11 << 11));
+                        break;
+                    } else if(funct7 == 0x9) {
+                        // fence
+                        // Do nothing.
+                        break;
+                    } else {
+                        printf("opcode %x funct3 %x funct7 %x not implemented yet", opcode, funct3, funct7);
+                        exit(1);
+                    }
+                }
                 case 0x1: {
                     // csrrw
                     uint64_t t = load_csr(csr_addr);
